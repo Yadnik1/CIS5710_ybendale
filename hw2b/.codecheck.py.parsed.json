@@ -1,0 +1,12 @@
+{
+  "codecheck.py": {
+    "errors": [
+      {
+        "column": 2,
+        "line": 0,
+        "phase": "lex",
+        "text": "\"This is run by the autograder before the tests, to determine if the"
+      }
+    ]
+  }
+}
