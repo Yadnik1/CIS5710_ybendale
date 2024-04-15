@@ -1,49 +1,47 @@
-/* Vedant Kelkar - vkelkar     Manas Kulkarni - manask */
+/* INSERT NAME AND PENNKEY HERE */
 
 `timescale 1ns / 1ns
 
 // quotient = dividend / divisor
 
-module divider_unsigned(
-    input wire [31:0] i_dividend,
-    input wire [31:0] i_divisor,
-    output wire [31:0] o_quotient,
-    output wire [31:0] o_remainder
+module divider_unsigned (
+    input  wire [31:0] i_dividend,
+    input  wire [31:0] i_divisor,
+    output wire [31:0] o_remainder,
+    output wire [31:0] o_quotient
 );
-    // Internal signals for connecting divu_1iter modules
-    wire [31:0] div [0:32];
-    wire [31:0] quo [0:32];
-    wire [31:0] rem [0:32];
 
+    // Need total of 33 pair of wires, as
+    // one additional for at end of the output
+    wire [31:0] wires_dividend[32:0];
+    wire [31:0] wires_remainder[32:0];
+    wire [31:0] wires_quotient[32:0];  
 
-    // Connect the first set of inputs to the external inputs
-    assign div[0] = i_dividend[31:0];
-    assign quo[0] = 32'b0;
-    assign rem[0] = 32'b0;
+    // Initial conditions for the iterative process
+    assign wires_dividend[0] = i_dividend[31:0];
+    assign wires_remainder[0] = 32'b0;
+    assign wires_quotient[0] = 32'b0;
 
+    // Generate block to conceptually iterate the division steps
     generate
-        
-    // Instantiate 32 divu_1iter modules
-    for (genvar i=0; i < 32; i++) begin : bit_num
-        divu_1iter num_iter (
-            .i_dividend(dividend[i]),
-            .i_divisor(i_divisor),
-            .i_remainder(remainder[i]),
-            .i_quotient(quotient[i]),
-            .o_dividend(dividend[i+1]),
-            .o_remainder(remainder[i+1]),
-            .o_quotient(quotient[i+1])
-        );
-
-    end
+        for (genvar i = 0; i < 32; i = i + 1) begin : div_loop
+            divu_1iter div_iter_step(
+                .i_dividend(wires_dividend[i]),
+                .i_divisor(i_divisor),
+                .i_remainder(wires_remainder[i]),
+                .i_quotient(wires_quotient[i]),
+                .o_dividend(wires_dividend[i+1]),
+                .o_remainder(wires_remainder[i+1]),
+                .o_quotient(wires_quotient[i+1])
+            );
+        end
     endgenerate
 
-    // Connect the last set of outputs to the external outputs
-    assign o_remainder = rem[32];
-    assign o_quotient = quo[32];
+    // Final step results are the output of the division process
+    assign o_remainder = wires_remainder[32];
+    assign o_quotient = wires_quotient[32];
 
 endmodule
-
 
 module divu_1iter (
     input  wire [31:0] i_dividend,
@@ -54,23 +52,39 @@ module divu_1iter (
     output wire [31:0] o_remainder,
     output wire [31:0] o_quotient
 );
-
+  /*
+    for (int i = 0; i < 32; i++) {
+        remainder = (remainder << 1) | ((dividend >> 31) & 0x1);
+        if (remainder < divisor) {
+            quotient = (quotient <<< 1);
+        } else {
+            quotient = (quotient <<< 1) | 0x1;
+            remainder = remainder - divisor;
+        }
+        dividend = dividend << 1;
+    }
+    */
     
-    logic [31:0] t_rem;
-    logic [31:0] t1_rem;
-    logic [31:0] quo;
-    logic [31:0] shifted_div;
+    // Internal signals for new values
+    logic [31:0] new_remainder;
+    logic [31:0] new_quotient;
+    logic [31:0] next_dividend;
 
+    // Procedural block for computing new values
     always_comb begin
-        assign t_rem = {i_remainder[30:0], i_dividend[31]};
-        assign shifted_div = i_dividend << 1;
+        new_remainder = (i_remainder <<< 1) | ((i_dividend >>> 31) & 32'b1);
+        new_quotient = (i_quotient <<< 1);
+        if (new_remainder >= i_divisor) begin
+            new_quotient = new_quotient | 32'b1;
+            new_remainder = new_remainder - i_divisor;
+        end
 
-        // Update quotient conditionally
-        assign quotient = (t_rem < i_divisor) ? (i_quotient << 1) : ({i_quotient[30:0], 1'b1});
-        assign t1_rem = (t_rema < i_divisor) ? t_rem : t_rem - i_divisor;
+        next_dividend = i_dividend <<< 1;
     end
 
-    assign o_dividend = shifted_div;
-    assign o_remainder = t1_rem;
-    assign o_quotient = quo;
+    // Continuous assignments to output wires
+    assign o_dividend = next_dividend;
+    assign o_remainder = new_remainder;
+    assign o_quotient = new_quotient;
+
 endmodule

@@ -21,11 +21,27 @@ module RegFile (
     input logic we,
     input logic rst
 );
+  
   localparam int NumRegs = 32;
   logic [`REG_SIZE] regs[NumRegs];
+  integer i;
 
-  // TODO: your code here
 
+  assign regs[0] = 32'd0; // x0 is always zero
+  assign rs1_data = regs[rs1]; // 1st read port
+  assign rs2_data = regs[rs2]; // 2nd read port
+
+  always_ff @(posedge clk) begin
+    if (rst == 1'b1) begin
+      for (i=0; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;
+      end
+    end else begin
+      if ((we==1'b1) && (rd != 5'd0)) begin 
+        regs[rd] <= rd_data;
+      end
+    end
+  end
 endmodule
 
 module DatapathSingleCycle (
@@ -88,7 +104,13 @@ module DatapathSingleCycle (
   localparam bit [`OPCODE_SIZE] OpEnviron = 7'b11_100_11;
 
   localparam bit [`OPCODE_SIZE] OpAuipc = 7'b00_101_11;
+
+  // edited: user added
   localparam bit [`OPCODE_SIZE] OpLui = 7'b01_101_11;
+  localparam bit [`OPCODE_SIZE] OpI = 7'b0010011;
+  localparam bit [`OPCODE_SIZE] OpR = 7'b0110011;
+  localparam bit [`OPCODE_SIZE] OpU = 7'b01_101_11;
+  localparam bit [`OPCODE_SIZE] Opecall = 7'b1110011;
 
   wire insn_lui = insn_opcode == OpLui;
   wire insn_auipc = insn_opcode == OpAuipc;
@@ -188,18 +210,366 @@ module DatapathSingleCycle (
 
   logic illegal_insn;
 
+  // extra wires for rs1_data and rs1_data
+  logic [`REG_SIZE] rs1_data_temp;
+  logic [`REG_SIZE] rs2_data_temp;
+  logic we_lui;
+  logic [`REG_SIZE] rd_data;
+  logic [`REG_SIZE]  alu_a, alu_b;
+  logic alu_cin;
+  logic [`REG_SIZE] alu_sum;
+  logic [`REG_SIZE] pc_inc;
+  logic [63:0] mult_res;
+  logic [31:0] mult_res_signed;
+  logic [63:0] mult_res_store;
+
+  logic [31:0] i_dividend_temp;
+  logic [31:0] i_divisor_temp;
+  logic [31:0] o_remainder_temp;
+  logic [31:0] o_quotient_temp;
+  logic [31:0] address_bits;
+  logic temp_rs1;
+  logic temp_rs2;
+  logic is_zero;
+
+  logic branch_taken;
+
+  RegFile rf(.rd(insn_rd), .rd_data(rd_data), .rs1(insn_rs1), .rs1_data(rs1_data_temp), 
+    .rs2(insn_rs2), .rs2_data(rs2_data_temp), .clk(clk), .we(we_lui) , .rst(rst));
+
+  cla alu (.a(alu_a), .b(alu_b), .cin(alu_cin), .sum(alu_sum));
+
+  divider_unsigned div(.i_dividend(i_dividend_temp),
+    .i_divisor(i_divisor_temp), .o_quotient(o_quotient_temp),
+    .o_remainder(o_remainder_temp));
+
   always_comb begin
+  // always_ff @(posedge clk) begin
+  // Using always ff doesn't work where there are subsequent 
+  // instructions to be run. 
+
     illegal_insn = 1'b0;
+    halt = 1'b0;  // edited: most of one riscv tests are failing if this line is removed
+    we_lui = 1'b0;
+    alu_cin = 1'b0;
+    branch_taken = 1'b0;
+    address_bits = 32'h0;
+    store_we_to_dmem = 4'b0000;
+
+    if (insn_fence == 1'b1) begin
+
+    end
+
+
+    if (insn_bne == 1'b1) begin
+      pc_inc = (rs1_data_temp != rs2_data_temp) ? imm_b_sext: 32'd4;
+    end else if (insn_beq == 1'b1) begin
+      pc_inc = (rs1_data_temp == rs2_data_temp) ? imm_b_sext : 32'd4;
+    end else if (insn_blt == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) < $signed(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bge == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) >= $signed(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bltu == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) < $unsigned(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bgeu == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) >= $unsigned(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else begin
+      pc_inc = 32'd4;
+    end
+
+    if (insn_ecall == 1'b1) begin
+      halt = 1'b1;
+    end
+
+    if (insn_jal == 1'b1) begin
+      we_lui = 1'b1;
+      rd_data = pcCurrent + 32'd4;
+      pc_inc = imm_j_sext;
+      pcNext = pcCurrent + pc_inc;
+      branch_taken = 1'b1;
+    end else if (insn_jalr == 1'b1) begin
+      we_lui = 1'b1;
+      rd_data = pcCurrent + 32'd4;
+      pc_inc = (rs1_data_temp + imm_i_sext) & 32'hFFFFFFFE;
+      pcNext = pcCurrent + pc_inc;
+      branch_taken = 1'b1;
+    end
+
+
+    if (insn_auipc == 1'b1) begin  
+        we_lui = 1'b1;
+        rd_data = pcCurrent + {insn_from_imem[31:12], 12'd0};
+    end
+
+    if (insn_lb | insn_lh | insn_lbu | insn_lhu | insn_lw) begin
+      address_bits = (rs1_data_temp + imm_i_sext);
+      addr_to_dmem = (address_bits) & 32'hFFFF_FFFC;
+    end else if (insn_sb | insn_sw | insn_sh) begin
+      address_bits = (rs1_data_temp + imm_s_sext);
+      addr_to_dmem = (address_bits) & 32'hFFFF_FFFC;
+    end
+
+
+    if (insn_lb == 1'b1) begin
+      we_lui = 1'b1;
+      if (address_bits[1:0] == 2'b00) begin
+        rd_data = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]};
+      end else if (address_bits[1:0] == 2'b01) begin
+        rd_data = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]};
+      end else if (address_bits[1:0] == 2'b10) begin
+        rd_data = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]};
+      end else begin
+        rd_data = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]};
+      end
+    end else if (insn_lh == 1'b1) begin
+      we_lui = 1'b1;
+      if (address_bits[1:0] == 2'b00) begin
+        rd_data = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]};
+      end else begin
+        rd_data = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]};
+      end
+    end else if (insn_lw == 1'b1) begin
+        we_lui = 1'b1;
+        rd_data = load_data_from_dmem[31:0];
+    end else if (insn_lbu == 1'b1) begin
+      we_lui = 1'b1;
+      if (address_bits[1:0] == 2'b00) begin
+        rd_data = {{24{1'b0}}, load_data_from_dmem[7:0]};
+      end else if (address_bits[1:0] == 2'b01) begin
+        rd_data = {{24{1'b0}}, load_data_from_dmem[15:8]};
+      end else if (address_bits[1:0] == 2'b10) begin
+        rd_data = {{24{1'b0}}, load_data_from_dmem[23:16]};
+      end else begin
+        rd_data = {{24{1'b0}}, load_data_from_dmem[31:24]};
+      end
+    end else if (insn_lhu == 1'b1) begin
+      we_lui = 1'b1;
+      if (address_bits[1:0] == 2'b00) begin
+        rd_data = {{16{1'b0}}, load_data_from_dmem[15:0]};
+      end else begin
+        rd_data = {{16{1'b0}}, load_data_from_dmem[31:16]};
+      end
+    end
+
+    if (insn_sb == 1'b1) begin
+      we_lui = 1'b0;
+      if (address_bits[1:0] == 2'b00) begin
+        store_we_to_dmem = 4'b0001;
+        store_data_to_dmem[7:0] = rs2_data_temp[7:0];
+      end else if (address_bits[1:0] == 2'b01) begin
+        store_we_to_dmem = 4'b0010;
+        store_data_to_dmem[15:8] = rs2_data_temp[7:0];
+      end else if (address_bits[1:0] == 2'b10) begin
+        store_we_to_dmem = 4'b0100;
+        store_data_to_dmem [23:16]= rs2_data_temp[7:0];
+      end else begin
+        store_we_to_dmem = 4'b1000;
+        store_data_to_dmem[31:24] = rs2_data_temp[7:0];
+      end
+    end else if (insn_sh == 1'b1) begin
+      we_lui = 1'b0;
+      if (address_bits[1:0] == 2'b00) begin
+        store_we_to_dmem = 4'b0011;
+        store_data_to_dmem [15:0]= rs2_data_temp[15:0];
+       end else begin
+        store_we_to_dmem = 4'b1100;
+        store_data_to_dmem [31:16] = rs2_data_temp[15:0];
+       end
+    end else if (insn_sw == 1'b1) begin
+      we_lui = 1'b0;
+      store_we_to_dmem = 4'b1111;
+      store_data_to_dmem = rs2_data_temp;
+    end
 
     case (insn_opcode)
-      OpLui: begin
-        // TODO: start here by implementing lui
+      OpU : begin
+        we_lui = 1'b1;
+
+        if (insn_lui == 1'b1) begin
+          if (insn_rd == 5'b0) begin
+            rd_data = 32'b0;
+          end else begin
+            rd_data = {insn_from_imem[31:12], 12'd0};
+          end
+        end
+
       end
+
+      OpI : begin
+        we_lui = 1'b1;
+      
+        if (insn_addi == 1'b1) begin  // Addi
+          alu_cin = 1'b0;
+          alu_a = rs1_data_temp;
+          alu_b = imm_i_sext;
+          rd_data = alu_sum;
+        end 
+        
+        if (insn_slti == 1'b1) begin  //slti have doubt if I have use sign
+          rd_data = $signed(rs1_data_temp) < $signed(imm_i_sext) ? 32'b1 : 32'b0;
+        end else if (insn_sltiu == 1'b1) begin
+          //we_lui = 1'b1;  // write signal is working properly. if not set properly fails test
+          rd_data = $signed(rs1_data_temp) < $unsigned(imm_i_sext) ? 32'b1 : 32'b0;
+        end
+
+        if (insn_xori == 1'b1) begin  // xori
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) ^ imm_i_sext;
+        end
+
+        if (insn_ori == 1'b1) begin  // ori
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) | imm_i_sext;
+        end
+
+        if (insn_andi == 1'b1) begin  // andi
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) & imm_i_sext;
+        end
+
+        if (insn_slli == 1'b1) begin  // slli not sure about using shamt
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp << imm_shamt;
+        end else if (insn_srli == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp >> imm_shamt;
+        end
+        
+        if (insn_srai == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) >>> imm_shamt;
+        end
+      end
+
+      OpR : begin
+        we_lui = 1'b1;
+
+        if (insn_add == 1'b1) begin
+          alu_cin = 1'b0;
+          //we_lui = 1'b1;
+          alu_a = rs1_data_temp;
+          alu_b = rs2_data_temp;
+          rd_data = alu_sum;
+        end
+
+        if (insn_sub == 1'b1) begin
+          //we_lui = 1'b1;
+          //rd_data = rs1_data_temp - rs2_data_temp;
+          alu_cin = 1'b1;
+          //we_lui = 1'b1;
+          alu_a = rs1_data_temp;
+          alu_b = ~rs2_data_temp;
+          rd_data = alu_sum;
+        end
+
+        if (insn_sll == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp << rs2_data_temp[4:0];
+        end
+
+        if (insn_slt == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) < $signed(rs2_data_temp) ? 32'b1 : 32'b0;
+        end else if (insn_sltu == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp < $unsigned(rs2_data_temp) ? 32'b1 : 32'b0;
+        end
+
+        if (insn_xor == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp ^ rs2_data_temp;
+        end
+
+        if (insn_srl == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp >> (rs2_data_temp[4:0]);
+        end
+        
+        if (insn_sra == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) >>> rs2_data_temp[4:0];
+        end
+
+        if (insn_or == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp | rs2_data_temp;
+        end
+
+        if (insn_and == 1'b1) begin
+          //we_lui = 1'b1;
+          rd_data = rs1_data_temp & rs2_data_temp;
+        end
+
+        if (insn_mul == 1'b1) begin
+          mult_res = rs1_data_temp * rs2_data_temp;
+          rd_data = mult_res[31:0];
+        end else if (insn_mulh == 1'b1) begin
+          mult_res = $signed(rs1_data_temp) * $signed(rs2_data_temp);
+          rd_data = mult_res[63:32];
+        end else if (insn_mulhsu == 1'b1) begin
+          if (rs1_data_temp[31] == 1'b1) begin
+            mult_res_signed = ~(rs1_data_temp) + 32'b1;
+          end else begin
+            mult_res_signed = rs1_data_temp;
+          end
+
+          mult_res = mult_res_signed * rs2_data_temp;
+
+          if (rs1_data_temp[31] == 1'b1) begin
+            mult_res_store = ~mult_res + 64'b1;
+          end else begin
+            mult_res_store = mult_res;
+          end
+          rd_data = mult_res_store[63:32];
+        end else if (insn_mulhu == 1'b1) begin
+          mult_res = $unsigned(rs1_data_temp) * $unsigned(rs2_data_temp);
+          rd_data = mult_res[63:32];
+        end
+
+        if (insn_div == 1'b1) begin
+          temp_rs1 = rs1_data_temp[31];
+          temp_rs2 = rs2_data_temp[31]; // it's better if I do this inside the module
+          is_zero = (rs1_data_temp == 0) | (rs2_data_temp == 0)  ;
+          i_dividend_temp = rs1_data_temp[31] ? (~rs1_data_temp + 1) : rs1_data_temp;
+          i_divisor_temp = rs2_data_temp[31] ? (~rs2_data_temp + 1) : rs2_data_temp;
+          // need check for zero condition
+          rd_data = is_zero ? $signed(32'hFFFFFFFF) : ((temp_rs1 != temp_rs2) ? (~o_quotient_temp + 1) : o_quotient_temp); 
+        end else if (insn_divu == 1'b1) begin
+          i_dividend_temp = $unsigned(rs1_data_temp);
+          i_divisor_temp = $unsigned(rs2_data_temp);
+          rd_data = o_quotient_temp;
+        end else if (insn_rem == 1'b1) begin
+          temp_rs1 = rs1_data_temp[31];
+          temp_rs2 = rs2_data_temp[31]; // it's better if I do this inside the module
+          is_zero = (rs1_data_temp == 0) | (rs2_data_temp == 0)  ;
+          i_dividend_temp = rs1_data_temp[31] ? (~rs1_data_temp + 1) : rs1_data_temp;
+          i_divisor_temp = rs2_data_temp[31] ? (~rs2_data_temp + 1) : rs2_data_temp;
+          // Determine if adjustment for signs is necessary
+          if (!is_zero && (temp_rs1 == 1'b1)) begin
+              // Adjust remainder sign to dividend
+              rd_data = ~o_remainder_temp + 1;
+          end else begin
+              rd_data = o_remainder_temp;
+          end
+        end else if (insn_remu == 1'b1) begin
+          i_dividend_temp = $unsigned(rs1_data_temp);
+          i_divisor_temp = $unsigned(rs2_data_temp);
+          rd_data = o_remainder_temp;
+        end
+
+      end
+
       default: begin
         illegal_insn = 1'b1;
       end
     endcase
+
+    if (branch_taken == 1'b0) begin
+      pcNext = pcCurrent + pc_inc;
+    end
+  
   end
+
 
 endmodule
 

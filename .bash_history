@@ -217,3 +217,12 @@ pytest-3 testbench.py
 pytest-3 testbench.py
 pytest-3 testbench.py
 pytest-3 testbench.py
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+ls
+cd hw3-singlecycle/
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+RVTEST_ALUBR=1 pytest-3 -s testbench.py
+exit

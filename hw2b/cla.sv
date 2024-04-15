@@ -1,5 +1,3 @@
-/* Yadnik Bendale: ybendale Rajneesh Kumar: rajneesh */
-
 `timescale 1ns / 1ps
 
 module gp1(input wire a, b, output wire g, p);
@@ -34,7 +32,7 @@ endmodule
 module cla(input wire [31:0] a, b, input wire cin, output wire [31:0] sum);
    wire [31:0] gin_a, pin_a;
    reg [31:0] inter_sum;
-   wire [30:0] cout; 
+   wire [30:0] cout; // Corrected from carry_out to cout
    wire [4:0] g_out, p_out;
    generate
       for(genvar i = 0; i < 32; i = i +1) begin : gp_a
@@ -45,7 +43,7 @@ module cla(input wire [31:0] a, b, input wire cin, output wire [31:0] sum);
    for(genvar j = 1; j < 4; j = j + 1) begin : gp8_b
       gp8 gp8_b_(.gin(gin_a[(j+1)*7:j*7]), .pin(pin_a[(j+1)*7:j*7]), .cin(cout[(j*7)-1]), .gout(g_out[j]), .pout(p_out[j]), .cout(cout[((j+1)*7)-1:j*7]));
    end
-   gp4 gp8_final(.gin(gin_a[31:28]), .pin(pin_a[31:28]), .cin(cout[27]), .gout(g_out[4]), .pout(p_out[4]), .cout(cout[30:28])); 
+   gp4 gp8_final(.gin(gin_a[31:28]), .pin(pin_a[31:28]), .cin(cout[27]), .gout(g_out[4]), .pout(p_out[4]), .cout(cout[30:28])); // Corrected for gp4 instantiation
    always_comb begin
       for(integer k = 0; k < 32; k = k + 1) begin
          if(k == 0) begin
@@ -56,5 +54,5 @@ module cla(input wire [31:0] a, b, input wire cin, output wire [31:0] sum);
       end
    end   
    assign sum = inter_sum;
-
 endmodule
+

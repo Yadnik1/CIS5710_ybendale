@@ -3,5 +3,14 @@
     "DockerRun.Containers": [
         "b094e69eb677",
         "211f0eb6837f"
-    ]
+    ],
+    "files.associations": {
+        "array": "c",
+        "vector": "c"
+    },
+    
+    "verilog.linting.veribleEnabled": true,
+    "verilog.linting.veriblePath": "/path/to/verible",
+    "verilog.formatting.provider": "verible",
+    "verilog.formatting.veriblePath": "/path/to/verible",
 }
