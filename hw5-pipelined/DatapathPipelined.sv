@@ -218,9 +218,9 @@ typedef struct packed {
   logic [3:0] store_we_to_dmem;
   logic [`REG_SIZE] store_data_to_dmem;
   logic [`OPCODE_SIZE] insn_opcode;
-  logic halt_sig;
+  logic sig_halt;
   logic branch_taken;
-  logic [`REG_SIZE] f_pc_next;
+  logic [`REG_SIZE] pc_nxt;
 } stage_memory_t;
 
 typedef struct packed {
@@ -234,7 +234,7 @@ typedef struct packed {
   logic [4:0] rs2_num;
   logic [`REG_SIZE] rs2_data_temp;
   logic [`OPCODE_SIZE] insn_opcode;
-  logic halt_sig;
+  logic sig_halt;
 } stage_writeback_t;
 
 module DatapathPipelined (
@@ -288,7 +288,7 @@ module DatapathPipelined (
   /* FETCH STAGE */
   /*****/
   logic [`REG_SIZE] f_pc_current;
-  logic [`REG_SIZE] f_pc_next; 
+  logic [`REG_SIZE] pc_nxt; 
   wire [`REG_SIZE] f_insn;
   cycle_status_e f_cycle_status;
 
@@ -302,7 +302,7 @@ module DatapathPipelined (
     end else begin
         f_cycle_status <= CYCLE_NO_STALL;
         if (branch_taken == 1'b1) begin
-          f_pc_current <= f_pc_next;
+          f_pc_current <= pc_nxt;
         end else begin
           f_pc_current <= f_pc_current + 4;
         end
@@ -460,6 +460,13 @@ module DatapathPipelined (
   assign exe_control_temp.insn_jal = decode_state.insn_opcode == OpcodeJal;
   assign exe_control_temp.insn_jalr = decode_state.insn_opcode == OpcodeJalr;
 
+  assign exe_control_temp.insn_addi = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b000;
+  assign exe_control_temp.insn_slti = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b010;
+  assign exe_control_temp.insn_sltiu = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b011;
+  assign exe_control_temp.insn_xori = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b100;
+  assign exe_control_temp.insn_ori = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b110;
+  assign exe_control_temp.insn_andi = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b111;
+
   assign exe_control_temp.insn_beq = decode_state.insn_opcode == OpcodeBranch && decode_state.insn_imem[14:12] == 3'b000;
   assign exe_control_temp.insn_bne = decode_state.insn_opcode == OpcodeBranch && decode_state.insn_imem[14:12] == 3'b001;
   assign exe_control_temp.insn_blt = decode_state.insn_opcode == OpcodeBranch && decode_state.insn_imem[14:12] == 3'b100;
@@ -477,16 +484,20 @@ module DatapathPipelined (
   assign exe_control_temp.insn_sh = decode_state.insn_opcode == OpcodeStore && decode_state.insn_imem[14:12] == 3'b001;
   assign exe_control_temp.insn_sw = decode_state.insn_opcode == OpcodeStore && decode_state.insn_imem[14:12] == 3'b010;
 
-  assign exe_control_temp.insn_addi = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b000;
-  assign exe_control_temp.insn_slti = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b010;
-  assign exe_control_temp.insn_sltiu = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b011;
-  assign exe_control_temp.insn_xori = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b100;
-  assign exe_control_temp.insn_ori = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b110;
-  assign exe_control_temp.insn_andi = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b111;
-
+  
   assign exe_control_temp.insn_slli = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b001 && decode_state.insn_imem[31:25] == 7'd0;
   assign exe_control_temp.insn_srli = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b101 && decode_state.insn_imem[31:25] == 7'd0;
   assign exe_control_temp.insn_srai = decode_state.insn_opcode == OpcodeRegImm && decode_state.insn_imem[14:12] == 3'b101 && decode_state.insn_imem[31:25] == 7'b0100000;
+
+  
+  assign exe_control_temp.insn_mul    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b000;
+  assign exe_control_temp.insn_mulh   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b001;
+  assign exe_control_temp.insn_mulhsu = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b010;
+  assign exe_control_temp.insn_mulhu  = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b011;
+  assign exe_control_temp.insn_div    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b100;
+  assign exe_control_temp.insn_divu   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b101;
+  assign exe_control_temp.insn_rem    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b110;
+  assign exe_control_temp.insn_remu   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b111;
 
   assign exe_control_temp.insn_add = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[14:12] == 3'b000 && decode_state.insn_imem[31:25] == 7'd0;
   assign exe_control_temp.insn_sub  = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[14:12] == 3'b000 && decode_state.insn_imem[31:25] == 7'b0100000;
@@ -498,15 +509,6 @@ module DatapathPipelined (
   assign exe_control_temp.insn_sra  = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[14:12] == 3'b101 && decode_state.insn_imem[31:25] == 7'b0100000;
   assign exe_control_temp.insn_or = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[14:12] == 3'b110 && decode_state.insn_imem[31:25] == 7'd0;
   assign exe_control_temp.insn_and = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[14:12] == 3'b111 && decode_state.insn_imem[31:25] == 7'd0;
-
-  assign exe_control_temp.insn_mul    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b000;
-  assign exe_control_temp.insn_mulh   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b001;
-  assign exe_control_temp.insn_mulhsu = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b010;
-  assign exe_control_temp.insn_mulhu  = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b011;
-  assign exe_control_temp.insn_div    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b100;
-  assign exe_control_temp.insn_divu   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b101;
-  assign exe_control_temp.insn_rem    = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b110;
-  assign exe_control_temp.insn_remu   = decode_state.insn_opcode == OpcodeRegReg && decode_state.insn_imem[31:25] == 7'd1 && decode_state.insn_imem[14:12] == 3'b111;
 
   assign exe_control_temp.insn_ecall = decode_state.insn_opcode == OpcodeEnviron && decode_state.insn_imem[31:7] == 25'd0;
   assign exe_control_temp.insn_fence = decode_state.insn_opcode == OpcodeMiscMem;
@@ -542,7 +544,7 @@ module DatapathPipelined (
       end
     end
 
-    execute_state_temp = '{
+    x_state_temp = '{
     pc: decode_state.pc,
     insn: decode_state.insn,
     cycle_status: decode_state.cycle_status,
@@ -566,12 +568,12 @@ module DatapathPipelined (
   /******/
   /* EXECUTE STAGE */
   /******/
-  stage_execute_t execute_state;
-  stage_execute_t execute_state_temp;
+  stage_execute_t x_state;
+  stage_execute_t x_state_temp;
 
   always_ff @(posedge clk) begin
     if (rst) begin
-      execute_state <= '{
+      x_state <= '{
         pc: 0,
         insn: 0,
         cycle_status: CYCLE_RESET,
@@ -592,9 +594,9 @@ module DatapathPipelined (
     end else begin
       begin
         if (branch_taken == 1'b1) begin
-            execute_state <= 0;
+            x_state <= 0;
         end else begin
-            execute_state <= execute_state_temp;
+            x_state <= x_state_temp;
         end 
       end
     end
@@ -604,222 +606,202 @@ module DatapathPipelined (
   Disasm #(
       .PREFIX("E")
   ) disasm_1execute (
-      .insn  (execute_state.insn),
+      .insn  (x_state.insn),
       .disasm(e_disasm)
   );
 
+
+  logic we1;
+  logic [63:0] result_mul;
+  logic [31:0] result_mul_signed;
+  logic [63:0] result_mul_store;
+  logic sig_halt;
+  logic sig_halt_temp;
+  logic [31:0] temp_dividend;
+  logic [31:0] divisor_temp;
+  logic [31:0] rem_temp_o;
+  logic [31:0] quo_temp_o;
+  logic c_in;
+  logic [`REG_SIZE] final_sum;
+  logic [`REG_SIZE] sum_a, sum_b;
   logic illegal_insn;
   logic [4:0] rd; 
   logic [`REG_SIZE] rd_data;
   logic [4:0] rs1; 
   logic [4:0] rs2; 
-  logic we1;
+  logic [`REG_SIZE] store_temp_dmem_addr;
+  logic [3:0] dmem_temp_store_we_to_;
+  logic [`REG_SIZE] temp_pcCurrent;
   
-  logic cin;
-  logic [`REG_SIZE] sum;
-  logic [`REG_SIZE] a, b;
+
+
+  logic [31:0] bits_address;
+  logic [`REG_SIZE] temp_dmem_addr;
+
+
+
   
-  logic halt_sig;
-  logic halt_sig_temp;
+  logic [`REG_SIZE] inc_pc;
 
-  logic [31:0] address_bits;
-  logic [`REG_SIZE] addr_to_dmem_temp;
-  logic [`REG_SIZE] store_data_to_dmem_temp;
-  logic [3:0] store_we_to_dmem_temp;
-  logic [`REG_SIZE] pcCurrent_temp;
-
-  logic [63:0] mul_result;
-  logic [31:0] mul_result_signed;
-  logic [63:0] mul_result_store;
-
-  logic [31:0] i_dividend_temp;
-  logic [31:0] i_divisor_temp;
-  logic [31:0] o_remainder_temp;
-  logic [31:0] o_quotient_temp;
-  
-  logic [`REG_SIZE] pc_inc;
-
-  logic temp_rs1;
-  logic temp_rs2;
+  logic rs1_temp;
+  logic rs2_temp;
   logic branch_taken;
   logic [`REG_SIZE] rd_temp;
 
-  logic [`OPCODE_SIZE] insn_opcode_x;
+  logic [`OPCODE_SIZE] opcode_x;
 
-  logic [4:0] mem_rd_num;
-  assign mem_rd_num = memory_state.rd_num;
+  logic [4:0] rd_mem_num;
+  assign rd_mem_num = memory_state.rd_num;
   
-  logic [4:0] w_rd_num;
-  assign w_rd_num = write_back_state.rd_num;
+  logic [4:0] writeback_rd_num;
+  assign writeback_rd_num = write_back_state.rd_num;
 
-  logic [4:0] exec_rs1_num;
-  assign exec_rs1_num = execute_state.rs1_num;
+  logic [4:0] rs1_num_exec;
+  assign rs1_num_exec = x_state.rs1_num;
 
-  logic [4:0] exec_rs2_num;
-  assign exec_rs2_num = execute_state.rs2_num;
+  logic [4:0] rs2_num_exec;
+  assign rs2_num_exec = x_state.rs2_num;
 
-  logic [`REG_SIZE] exec_rs1_data;
+  logic [`REG_SIZE] rs1_data_exec;
 
-  logic [`REG_SIZE] exec_rs2_data;
+  logic [`REG_SIZE] rs2_data_exec;
 
-  logic [3:0] mx_wx_mux;
+  logic [3:0] mx_wx_multiplex;
 
-  assign insn_opcode_x = execute_state.insn_opcode;
+  assign opcode_x = x_state.insn_opcode;
 
   RegFile rf(.rd(write_back_state.rd_num), .rd_data(write_back_state.rd_val), .rs1(decode_state.rs1_num), .rs1_data(rs1_data_temp), 
   .rs2(decode_state.rs2_num), .rs2_data(rs2_data_temp), .clk(clk), .we(we1), .rst(rst));
 
-  cla alu (.a(a), .b(b), .cin(cin), .sum(sum));
+  cla alu (.a(sum_a), .b(sum_b), .cin(c_in), .sum(final_sum));
 
-  divider_unsigned_pipelined div(.clk(clk), .rst(rst), .i_dividend(i_dividend_temp),
-    .i_divisor(i_divisor_temp), .o_quotient(o_quotient_temp),
-    .o_remainder(o_remainder_temp));
+  divider_unsigned_pipelined div(.clk(clk), .rst(rst), .i_dividend(temp_dividend),
+    .i_divisor(divisor_temp), .o_quotient(quo_temp_o),
+    .o_remainder(rem_temp_o));
   always_comb begin
-  exec_rs1_data = execute_state.rs1_data_temp;
-  exec_rs2_data = execute_state.rs2_data_temp;
+  rs1_data_exec = x_state.rs1_data_temp;
+  rs2_data_exec = x_state.rs2_data_temp;
 
-  mx_wx_mux = 0;
+  mx_wx_multiplex = 0;
 
-    if (mem_rd_num != 0 || w_rd_num != 0) begin
-      if (mem_rd_num == exec_rs1_num && mem_rd_num != exec_rs2_num && mem_rd_num != 0) begin
-        mx_wx_mux = 1;
-        exec_rs1_data = memory_state.rd_val;
-      end if (mem_rd_num == exec_rs2_num && mem_rd_num != exec_rs1_num  && mem_rd_num != 0) begin
-        mx_wx_mux = 2;
-        exec_rs2_data = memory_state.rd_val;
-      end if (mem_rd_num == exec_rs1_num && mem_rd_num == exec_rs2_num && mem_rd_num != 0) begin
-        mx_wx_mux = 3;
-        exec_rs1_data = memory_state.rd_val;
-        exec_rs2_data = memory_state.rd_val;
-      end if (w_rd_num == exec_rs1_num && w_rd_num != exec_rs2_num && w_rd_num != mem_rd_num && w_rd_num != 0) begin
-        mx_wx_mux = 4;
-        exec_rs1_data = write_back_state.rd_val;
-      end if (w_rd_num == exec_rs2_num && w_rd_num != exec_rs1_num && w_rd_num != mem_rd_num && w_rd_num != 0) begin
-        mx_wx_mux = 5;
-        exec_rs2_data = write_back_state.rd_val;
-      end if (w_rd_num == exec_rs1_num && w_rd_num == exec_rs2_num && w_rd_num != mem_rd_num && w_rd_num != 0) begin
-        mx_wx_mux = 6;
-        exec_rs2_data = write_back_state.rd_val;
-        exec_rs1_data = write_back_state.rd_val;
-      end if (mem_rd_num == exec_rs1_num && w_rd_num == exec_rs2_num && exec_rs1_num != exec_rs2_num && (w_rd_num != 0 && mem_rd_num != 0)) begin
-        mx_wx_mux = 7;
-        exec_rs1_data = memory_state.rd_val;
-        exec_rs2_data = write_back_state.rd_val;
-      end if (mem_rd_num == exec_rs2_num && w_rd_num == exec_rs1_num && exec_rs1_num != exec_rs2_num && (w_rd_num != 0 && mem_rd_num != 0)) begin
-        mx_wx_mux = 8;
-        exec_rs2_data = memory_state.rd_val;
-        exec_rs1_data = write_back_state.rd_val;
+    if (rd_mem_num != 0 || writeback_rd_num != 0) begin
+      if (rd_mem_num == rs1_num_exec && rd_mem_num != rs2_num_exec && rd_mem_num != 0) begin
+        mx_wx_multiplex = 1;
+        rs1_data_exec = memory_state.rd_val;
+      end if (rd_mem_num == rs2_num_exec && rd_mem_num != rs1_num_exec  && rd_mem_num != 0) begin
+        mx_wx_multiplex = 2;
+        rs2_data_exec = memory_state.rd_val;
+      end if (rd_mem_num == rs1_num_exec && rd_mem_num == rs2_num_exec && rd_mem_num != 0) begin
+        mx_wx_multiplex = 3;
+        rs1_data_exec = memory_state.rd_val;
+        rs2_data_exec = memory_state.rd_val;
+      end if (writeback_rd_num == rs1_num_exec && writeback_rd_num != rs2_num_exec && writeback_rd_num != rd_mem_num && writeback_rd_num != 0) begin
+        mx_wx_multiplex = 4;
+        rs1_data_exec = write_back_state.rd_val;
+      end if (writeback_rd_num == rs2_num_exec && writeback_rd_num != rs1_num_exec && writeback_rd_num != rd_mem_num && writeback_rd_num != 0) begin
+        mx_wx_multiplex = 5;
+        rs2_data_exec = write_back_state.rd_val;
+      end if (writeback_rd_num == rs1_num_exec && writeback_rd_num == rs2_num_exec && writeback_rd_num != rd_mem_num && writeback_rd_num != 0) begin
+        mx_wx_multiplex = 6;
+        rs2_data_exec = write_back_state.rd_val;
+        rs1_data_exec = write_back_state.rd_val;
+      end if (rd_mem_num == rs1_num_exec && writeback_rd_num == rs2_num_exec && rs1_num_exec != rs2_num_exec && (writeback_rd_num != 0 && rd_mem_num != 0)) begin
+        mx_wx_multiplex = 7;
+        rs1_data_exec = memory_state.rd_val;
+        rs2_data_exec = write_back_state.rd_val;
+      end if (rd_mem_num == rs2_num_exec && writeback_rd_num == rs1_num_exec && rs1_num_exec != rs2_num_exec && (writeback_rd_num != 0 && rd_mem_num != 0)) begin
+        mx_wx_multiplex = 8;
+        rs2_data_exec = memory_state.rd_val;
+        rs1_data_exec = write_back_state.rd_val;
       end
 
     end
 
-  cin = 1'b0;
-  f_pc_next = 0;
-  rd_temp = 32'd0;
-  i_divisor_temp = 32'b0;
-  i_dividend_temp = 32'b0;
-  halt_sig_temp = 1'b0;
+  c_in = 1'b0;
   branch_taken = 1'b0;
   illegal_insn = 1'b0;
-  mul_result = 64'b0;
-  mul_result_signed = 32'b0;
-  mul_result_store = 64'b0;
-  a = $signed(exec_rs1_data);
-  b = $signed(exec_rs2_data);
+  result_mul = 64'b0;
+  result_mul_signed = 32'b0;
+  result_mul_store = 64'b0;
+  pc_nxt = 0;
+  rd_temp = 32'd0;
+  divisor_temp = 32'b0;
+  temp_dividend = 32'b0;
+  sig_halt_temp = 1'b0;
+  sum_a = $signed(rs1_data_exec);
+  sum_b = $signed(rs2_data_exec);
 
-  case (insn_opcode_x)
+  case (opcode_x)
       OpcodeMiscMem: begin
-          if(execute_state.exe_control.insn_fence) begin 
+          if(x_state.exe_control.insn_fence) begin 
           end else begin
             illegal_insn = 1'b1;
           end 
     end
 		
 	  OpcodeEnviron: begin
-          if(execute_state.exe_control.insn_ecall) begin
-            halt_sig_temp = 1'b1;
+          if(x_state.exe_control.insn_ecall) begin
+            sig_halt_temp = 1'b1;
           end
        end
 
     OpcodeLui: begin
-      if(execute_state.rd_num == 5'b0)
+      if(x_state.rd_num == 5'b0)
         rd_temp = 32'b0;
       else begin
-        rd_temp = {execute_state.insn_imem[31:12], 12'd0};
+        rd_temp = {x_state.insn_imem[31:12], 12'd0};
       end
 		end
 
-    OpcodeJal: begin
-      if (execute_state.exe_control.insn_jal) begin
-        rd_temp = execute_state.pc + 32'd4;
-        f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
-        branch_taken = 1'b1;
-      end 
-      else begin 
-        branch_taken = 1'b0;
-      end
-    end
-
-    OpcodeJalr: begin
-      if (execute_state.exe_control.insn_jalr) begin 
-        rd_temp = execute_state.pc + 32'd4;
-        f_pc_next = (($signed(exec_rs1_data) + $signed(execute_state.imm_i_sz_ext)) & 32'hFFFFFFFE);
-        branch_taken = 1'b1;
-      end 
-      else begin 
-        branch_taken = 1'b0;
-      end
-    end 
-
     OpcodeBranch: begin
-      if(execute_state.exe_control.insn_beq) begin 
-        if(exec_rs1_data == exec_rs2_data) begin 
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      if(x_state.exe_control.insn_beq) begin 
+        if(rs1_data_exec == rs2_data_exec) begin 
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
         end
         else begin 
           branch_taken = 1'b0;
         end 
       end else
-      if(execute_state.exe_control.insn_bne)begin
-        if (exec_rs1_data != exec_rs2_data) begin
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      if(x_state.exe_control.insn_bne)begin
+        if (rs1_data_exec != rs2_data_exec) begin
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
           end
         else begin 
           branch_taken = 1'b0;
         end 
       end  
-      else if(execute_state.exe_control.insn_blt)begin 
-        if($signed(exec_rs1_data) < $signed(exec_rs2_data)) begin
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_blt)begin 
+        if($signed(rs1_data_exec) < $signed(rs2_data_exec)) begin
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
         end 
         else begin 
           branch_taken = 1'b0;
         end
       end
-      else if(execute_state.exe_control.insn_bge)begin 
-        if($signed(exec_rs1_data) >= $signed(exec_rs2_data)) begin
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_bge)begin 
+        if($signed(rs1_data_exec) >= $signed(rs2_data_exec)) begin
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
         end
         else begin 
           branch_taken = 1'b0;
         end 
       end 
-      else if(execute_state.exe_control.insn_bltu)begin 
-        if($signed(exec_rs1_data) < $unsigned(exec_rs2_data)) begin
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_bltu)begin 
+        if($signed(rs1_data_exec) < $unsigned(rs2_data_exec)) begin
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
         end
         else begin 
           branch_taken = 1'b0;
         end
       end
-      else if(execute_state.exe_control.insn_bgeu)begin 
-        if($signed(exec_rs1_data) >= $unsigned(exec_rs2_data)) begin
-          f_pc_next = execute_state.pc + execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_bgeu)begin 
+        if($signed(rs1_data_exec) >= $unsigned(rs2_data_exec)) begin
+          pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
           branch_taken = 1'b1;
         end
         else begin 
@@ -831,40 +813,41 @@ module DatapathPipelined (
     end 
 
     OpcodeRegImm: begin 
-      if(execute_state.exe_control.insn_addi) begin 
-          a = exec_rs1_data;
-          b = execute_state.imm_i_sz_ext;
-          rd_temp = sum;
+      if(x_state.exe_control.insn_addi) begin 
+          sum_a = rs1_data_exec;
+          sum_b = x_state.imm_i_sz_ext;
+          rd_temp = final_sum;
       end
-      else if (execute_state.exe_control.insn_slti) begin 
-        if($signed(execute_state.imm_i_sz_ext) > $signed(exec_rs1_data))
+      else if (x_state.exe_control.insn_slti) begin 
+        if($signed(x_state.imm_i_sz_ext) > $signed(rs1_data_exec))
           rd_temp = 32'b1;
         else
           rd_temp = 32'b0;
       end
-      else if(execute_state.exe_control.insn_sltiu) begin
-        if($signed(exec_rs1_data) < $unsigned(execute_state.imm_i_sz_ext))
+      else if(x_state.exe_control.insn_sltiu) begin
+        if($signed(rs1_data_exec) < $unsigned(x_state.imm_i_sz_ext))
           rd_temp = 32'b1;
         else
           rd_temp = 32'b0;
       end  
-      else if(execute_state.exe_control.insn_xori) begin 
-        rd_temp = $signed(exec_rs1_data) ^ execute_state.imm_i_sz_ext;
+
+      else if(x_state.exe_control.insn_srai) begin
+        rd_temp = ($signed(rs1_data_exec) >>> (x_state.imm_i_sz_ext[4:0]));
+      end
+     else if(x_state.exe_control.insn_xori) begin 
+        rd_temp = $signed(rs1_data_exec) ^ x_state.imm_i_sz_ext;
       end 
-      else if(execute_state.exe_control.insn_ori) begin
-        rd_temp = $signed(exec_rs1_data) | execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_ori) begin
+        rd_temp = $signed(rs1_data_exec) | x_state.imm_i_sz_ext;
       end
-      else if(execute_state.exe_control.insn_andi) begin
-        rd_temp = $signed(exec_rs1_data) & execute_state.imm_i_sz_ext;
+      else if(x_state.exe_control.insn_andi) begin
+        rd_temp = $signed(rs1_data_exec) & x_state.imm_i_sz_ext;
       end
-      else if(execute_state.exe_control.insn_slli) begin
-        rd_temp = (exec_rs1_data << (execute_state.imm_i_sz_ext[4:0]));
+      else if(x_state.exe_control.insn_slli) begin
+        rd_temp = (rs1_data_exec << (x_state.imm_i_sz_ext[4:0]));
       end
-      else if(execute_state.exe_control.insn_srli) begin
-        rd_temp = (exec_rs1_data >> (execute_state.imm_i_sz_ext[4:0]));
-      end
-      else if(execute_state.exe_control.insn_srai) begin
-        rd_temp = ($signed(exec_rs1_data) >>> (execute_state.imm_i_sz_ext[4:0]));
+      else if(x_state.exe_control.insn_srli) begin
+        rd_temp = (rs1_data_exec >> (x_state.imm_i_sz_ext[4:0]));
       end
       else begin 
         illegal_insn = 1'b1;
@@ -872,107 +855,128 @@ module DatapathPipelined (
     end
 
     OpcodeRegReg: begin
-      if(execute_state.exe_control.insn_add) begin 
-        a = exec_rs1_data;
-        b = exec_rs2_data;
-        rd_temp = sum;
+      if(x_state.exe_control.insn_add) begin 
+        sum_a = rs1_data_exec;
+        sum_b = rs2_data_exec;
+        rd_temp = final_sum;
       end
-      else if(execute_state.exe_control.insn_sub) begin 
-        a = exec_rs1_data;
-        b = ~exec_rs2_data;
-        cin = 1'b1;
-        rd_temp = sum;
+      else if(x_state.exe_control.insn_sub) begin 
+        sum_a = rs1_data_exec;
+        sum_b = ~rs2_data_exec;
+        c_in = 1'b1;
+        rd_temp = final_sum;
       end
-      else if(execute_state.exe_control.insn_sll) begin 
-        rd_temp = exec_rs1_data << exec_rs2_data[4:0];
+      else if(x_state.exe_control.insn_sll) begin 
+        rd_temp = rs1_data_exec << rs2_data_exec[4:0];
       end
-      else if(execute_state.exe_control.insn_slt) begin  
-        if($signed(exec_rs1_data) < $signed(exec_rs2_data)) 
+      else if(x_state.exe_control.insn_slt) begin  
+        if($signed(rs1_data_exec) < $signed(rs2_data_exec)) 
           rd_temp = 32'b1;
         else 
           rd_temp = 32'b0;
       end
-      else if(execute_state.exe_control.insn_sltu) begin 
-        rd_temp = (exec_rs1_data < $unsigned(exec_rs2_data))? 32'b1:32'b0;
+      else if(x_state.exe_control.insn_sltu) begin 
+        rd_temp = (rs1_data_exec < $unsigned(rs2_data_exec))? 32'b1:32'b0;
       end
-      else if(execute_state.exe_control.insn_xor) begin 
-        rd_temp = exec_rs1_data ^ exec_rs2_data;
+      else if(x_state.exe_control.insn_xor) begin 
+        rd_temp = rs1_data_exec ^ rs2_data_exec;
       end
-      else if(execute_state.exe_control.insn_srl) begin 
-        rd_temp = exec_rs1_data >> (exec_rs2_data[4:0]);
+      else if(x_state.exe_control.insn_srl) begin 
+        rd_temp = rs1_data_exec >> (rs2_data_exec[4:0]);
       end
-      else if(execute_state.exe_control.insn_sra) begin 
-        rd_temp = $signed(exec_rs1_data) >>> (exec_rs2_data[4:0]);
+      else if(x_state.exe_control.insn_sra) begin 
+        rd_temp = $signed(rs1_data_exec) >>> (rs2_data_exec[4:0]);
       end
-      else if(execute_state.exe_control.insn_or) begin 
-        rd_temp = exec_rs1_data | exec_rs2_data;
+      else if(x_state.exe_control.insn_or) begin 
+        rd_temp = rs1_data_exec | rs2_data_exec;
       end
-      else if(execute_state.exe_control.insn_and) begin 
-        rd_temp = exec_rs1_data & exec_rs2_data;
+      else if(x_state.exe_control.insn_and) begin 
+        rd_temp = rs1_data_exec & rs2_data_exec;
       end
-      else if(execute_state.exe_control.insn_mul)begin 
-        mul_result = (exec_rs1_data * exec_rs2_data);
-        rd_temp = mul_result[31:0];
+      else if(x_state.exe_control.insn_mul)begin 
+        result_mul = (rs1_data_exec * rs2_data_exec);
+        rd_temp = result_mul[31:0];
       end 
-      else if(execute_state.exe_control.insn_mulh)begin 
-        mul_result = ($signed(exec_rs1_data) * $signed(exec_rs2_data));
-        rd_temp = mul_result[63:32];
+      else if(x_state.exe_control.insn_mulh)begin 
+        result_mul = ($signed(rs1_data_exec) * $signed(rs2_data_exec));
+        rd_temp = result_mul[63:32];
       end  
-      else if(execute_state.exe_control.insn_mulhsu)begin 
-        mul_result_signed = (exec_rs1_data[31]) ? (~exec_rs1_data + 32'b1) : exec_rs1_data;
-        mul_result = (mul_result_signed * $unsigned(exec_rs2_data));
-        if(exec_rs1_data[31]) begin
-          mul_result_store = ~mul_result + 64'b1;
+      else if(x_state.exe_control.insn_mulhsu)begin 
+        result_mul_signed = (rs1_data_exec[31]) ? (~rs1_data_exec + 32'b1) : rs1_data_exec;
+        result_mul = (result_mul_signed * $unsigned(rs2_data_exec));
+        if(rs1_data_exec[31]) begin
+          result_mul_store = ~result_mul + 64'b1;
         end 
         else begin
-          mul_result_store = mul_result;
+          result_mul_store = result_mul;
         end 
-        rd_temp = mul_result_store[63:32];                     
+        rd_temp = result_mul_store[63:32];                     
       end
-      else if(execute_state.exe_control.insn_mulhu)begin 
-        mul_result = ($unsigned(exec_rs1_data) *  $unsigned(exec_rs2_data));
-        rd_temp = mul_result[63:32];
+      else if(x_state.exe_control.insn_mulhu)begin 
+        result_mul = ($unsigned(rs1_data_exec) *  $unsigned(rs2_data_exec));
+        rd_temp = result_mul[63:32];
       end
-      else if(execute_state.exe_control.insn_div)begin 
-        i_dividend_temp = (exec_rs1_data[31]) ? (~exec_rs1_data + 32'b1) : exec_rs1_data; 
-        i_divisor_temp = (exec_rs2_data[31]) ? (~exec_rs2_data + 32'b1) : exec_rs2_data;
-        if(( exec_rs1_data == 0 | exec_rs2_data == 0)) begin  
+      else if(x_state.exe_control.insn_div)begin 
+        temp_dividend = (rs1_data_exec[31]) ? (~rs1_data_exec + 32'b1) : rs1_data_exec; 
+        divisor_temp = (rs2_data_exec[31]) ? (~rs2_data_exec + 32'b1) : rs2_data_exec;
+        if(( rs1_data_exec == 0 | rs2_data_exec == 0)) begin  
             rd_temp = $signed(32'hFFFF_FFFF);             
         end 
-        else if(exec_rs1_data[31] != exec_rs2_data[31]) begin
-          rd_temp = (~o_quotient_temp + 32'b1);
+        else if(rs1_data_exec[31] != rs2_data_exec[31]) begin
+          rd_temp = (~quo_temp_o + 32'b1);
         end 
         else begin 
-          rd_temp = o_quotient_temp;
+          rd_temp = quo_temp_o;
         end 
       end
-      else if(execute_state.exe_control.insn_divu)begin 
-        i_dividend_temp = $signed(exec_rs1_data); 
-        i_divisor_temp =  $unsigned(exec_rs2_data);
-        rd_temp = o_quotient_temp;
+      else if(x_state.exe_control.insn_divu)begin 
+        temp_dividend = $signed(rs1_data_exec); 
+        divisor_temp =  $unsigned(rs2_data_exec);
+        rd_temp = quo_temp_o;
       end
-      else if (execute_state.exe_control.insn_rem)begin 
-        i_dividend_temp = (exec_rs1_data[31]) ? (~exec_rs1_data + 32'b1) : exec_rs1_data; 
-        i_divisor_temp = (exec_rs2_data[31]) ? (~exec_rs2_data + 32'b1) : exec_rs2_data;
-        if(exec_rs1_data == 32'b0) begin  
-            rd_temp = (exec_rs2_data[31]) ? (~exec_rs2_data + 32'b1) : exec_rs2_data;             
+      else if (x_state.exe_control.insn_rem)begin 
+        temp_dividend = (rs1_data_exec[31]) ? (~rs1_data_exec + 32'b1) : rs1_data_exec; 
+        divisor_temp = (rs2_data_exec[31]) ? (~rs2_data_exec + 32'b1) : rs2_data_exec;
+        if(rs1_data_exec == 32'b0) begin  
+            rd_temp = (rs2_data_exec[31]) ? (~rs2_data_exec + 32'b1) : rs2_data_exec;             
         end 
-        else if((exec_rs1_data[31])) begin
-          rd_temp = (~o_remainder_temp + 32'b1);
+        else if((rs1_data_exec[31])) begin
+          rd_temp = (~rem_temp_o + 32'b1);
         end 
         else begin 
-          rd_temp = o_remainder_temp;
+          rd_temp = rem_temp_o;
         end
       end 
-      else if(execute_state.exe_control.insn_remu)begin
-        i_dividend_temp = $signed(exec_rs1_data); 
-        i_divisor_temp =  $unsigned(exec_rs2_data);
-        rd_temp = o_remainder_temp;
+      else if(x_state.exe_control.insn_remu)begin
+        temp_dividend = $signed(rs1_data_exec); 
+        divisor_temp =  $unsigned(rs2_data_exec);
+        rd_temp = rem_temp_o;
       end  
       else begin 
         illegal_insn = 1'b1;
       end                  
     end
+      OpcodeJal: begin
+      if (x_state.exe_control.insn_jal) begin
+        rd_temp = x_state.pc + 32'd4;
+        pc_nxt = x_state.pc + x_state.imm_i_sz_ext;
+        branch_taken = 1'b1;
+      end 
+      else begin 
+        branch_taken = 1'b0;
+      end
+    end
+
+    OpcodeJalr: begin
+      if (x_state.exe_control.insn_jalr) begin 
+        rd_temp = x_state.pc + 32'd4;
+        pc_nxt = (($signed(rs1_data_exec) + $signed(x_state.imm_i_sz_ext)) & 32'hFFFFFFFE);
+        branch_taken = 1'b1;
+      end 
+      else begin 
+        branch_taken = 1'b0;
+      end
+    end 
 
     OpcodeStore: begin
     end
@@ -994,6 +998,12 @@ module DatapathPipelined (
   always_ff @(posedge clk) begin
     if (rst) begin
       memory_state <= '{
+        addr_to_dmem: 0,
+        store_we_to_dmem: 0,
+        store_data_to_dmem: 0,
+        insn_opcode: 0,
+        sig_halt: 0,
+        branch_taken: 0,
         pc: 0,
         insn: 0,
         cycle_status: CYCLE_RESET,
@@ -1003,43 +1013,37 @@ module DatapathPipelined (
         rs2_data_temp: 0,
         rd_num: 0,
         rd_val: 0,
-        addr_to_dmem: 0,
-        store_we_to_dmem: 0,
-        store_data_to_dmem: 0,
-        insn_opcode: 0,
-        halt_sig: 0,
-        branch_taken: 0,
-        f_pc_next: 0
+        pc_nxt: 0
       };
     end else begin
       begin
         memory_state <= '{
-          pc: execute_state.pc,
-          insn: execute_state.insn,
-          cycle_status: execute_state.cycle_status,
-          rs1_num: execute_state.rs1_num,
-          rs1_data_temp: exec_rs1_data,
-          rs2_num: execute_state.rs2_num,
-          rs2_data_temp: exec_rs2_data,
-          rd_num: execute_state.rd_num,
-          rd_val: rd_temp,
-          addr_to_dmem: execute_state.addr_to_dmem,
-          store_we_to_dmem: execute_state.store_we_to_dmem,
-          store_data_to_dmem: execute_state.store_data_to_dmem,
-          insn_opcode: execute_state.insn_opcode,
-          halt_sig: halt_sig_temp,
+          addr_to_dmem: x_state.addr_to_dmem,
+          store_we_to_dmem: x_state.store_we_to_dmem,
+          store_data_to_dmem: x_state.store_data_to_dmem,
+          insn_opcode: x_state.insn_opcode,
+          sig_halt: sig_halt_temp,
           branch_taken: branch_taken,
-          f_pc_next: f_pc_next
+          pc: x_state.pc,
+          insn: x_state.insn,
+          cycle_status: x_state.cycle_status,
+          rs1_num: x_state.rs1_num,
+          rs1_data_temp: rs1_data_exec,
+          rs2_num: x_state.rs2_num,
+          rs2_data_temp: rs2_data_exec,
+          rd_num: x_state.rd_num,
+          rd_val: rd_temp,
+          pc_nxt: pc_nxt
         };
       end
     end
   end
-  wire [255:0] mem_disasm;
+  wire [255:0] memory_disasm;
   Disasm #(
       .PREFIX("M")
   ) disasm_1memory (
       .insn  (memory_state.insn),
-      .disasm(mem_disasm)
+      .disasm(memory_disasm)
   );
 
   /******/
@@ -1060,7 +1064,7 @@ module DatapathPipelined (
         rs2_num: 0,
         rs2_data_temp: 0,
         insn_opcode: 0,
-        halt_sig: 0
+        sig_halt: 0
       };
     end else begin
       begin
@@ -1068,29 +1072,29 @@ module DatapathPipelined (
           pc: memory_state.pc,
           insn: memory_state.insn,
           cycle_status: memory_state.cycle_status,
-          rd_num: memory_state.rd_num,
-          rd_val: memory_state.rd_val,
           rs1_num: memory_state.rs1_num,
           rs1_data_temp: memory_state.rs1_data_temp,
           rs2_num: memory_state.rs2_num,
           rs2_data_temp: memory_state.rs2_data_temp,
+          rd_num: memory_state.rd_num,
+          rd_val: memory_state.rd_val,
           insn_opcode: memory_state.insn_opcode,
-          halt_sig: memory_state.halt_sig
+          sig_halt: memory_state.sig_halt
         };
       end
     end
   end
 
-  wire [255:0] write_back_disasm;
+  wire [255:0] write_disasm;
   Disasm #(
       .PREFIX("W")
   ) disasm_1writeback (
       .insn  (write_back_state.insn),
-      .disasm(write_back_disasm)
+      .disasm(write_disasm)
   );
 
   assign we1 = (write_back_state.insn_opcode == 7'h63 || write_back_state.insn_opcode == 7'h23) || (write_back_state.rd_num == 0)? 1'b0 : 1'b1;
-  assign halt = write_back_state.halt_sig; 
+  assign halt = write_back_state.sig_halt; 
 
   assign trace_writeback_cycle_status = write_back_state.cycle_status;
 
